@@ -142,46 +142,26 @@
         return true;
     }
 
-    // Main initialization
-    function init() {
+    // ============================================
+    // FAST INITIALIZATION - Runs immediately
+    // ============================================
+    (function() {
+        // Try to insert immediately without waiting for DOMContentLoaded
         const productId = getProductIdFromURL();
-        if (!productId || !BUNDLES_BY_PRODUCT_ID[productId]) return;
-
-        const bundlesData = normalizeBundleSelection(
-            BUNDLES_BY_PRODUCT_ID[productId].bundles,
-        );
-        if (!bundlesData.length) return;
-
-        // Try immediate insertion
-        if (insertBundles(bundlesData)) return;
-
-        // Fallback: Watch for DOM changes (handles Salla's dynamic loading)
-        const startTime = Date.now();
-        let pending = false;
-
-        const observer = new MutationObserver(() => {
-            if (pending) return;
-            pending = true;
-
-            requestAnimationFrame(() => {
-                pending = false;
-                if (Date.now() - startTime > WAIT_MAX_MS) {
-                    observer.disconnect();
-                    return;
+        if (productId && BUNDLES_BY_PRODUCT_ID[productId]) {
+            const bundlesData = normalizeBundleSelection(BUNDLES_BY_PRODUCT_ID[productId].bundles);
+            if (bundlesData.length) {
+                // Immediate attempt
+                if (!insertBundles(bundlesData)) {
+                    // If fails (DOM not ready), use MutationObserver as fallback
+                    const observer = new MutationObserver(() => {
+                        if (insertBundles(bundlesData)) observer.disconnect();
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                    // Timeout fallback - disconnect after 3 seconds to prevent memory leaks
+                    setTimeout(() => observer.disconnect(), 3000);
                 }
-                if (insertBundles(bundlesData)) {
-                    observer.disconnect();
-                }
-            });
-        });
-
-        observer.observe(document.body, { childList: true, subtree: true });
-    }
-
-    // Start when DOM is ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init, { once: true });
-    } else {
-        (window.requestIdleCallback || ((fn) => setTimeout(fn, 1)))(init);
-    }
+            }
+        }
+    })();
 })();
