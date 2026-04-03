@@ -6,26 +6,19 @@
     window.__lunelBundlesLoaded = true;
 
     const LUNEL_BUNDLES_ROOT_ID = 'lunel-bundles-root';
-    const WAIT_MAX_MS = 12000;
-
-    // Get configuration from window object (set by store owner in dashboard)
     const BUNDLES_BY_PRODUCT_ID = window.LUNEL_BUNDLES_CONFIG || {};
 
     // Early exit if no config exists
     if (Object.keys(BUNDLES_BY_PRODUCT_ID).length === 0) {
-        console.warn(
-            'Lunel Bundles: No configuration found. Please set window.LUNEL_BUNDLES_CONFIG',
-        );
+        console.warn('Lunel Bundles: No configuration found.');
         return;
     }
 
-    // Extract product ID from Salla URL
     function getProductIdFromURL() {
         const match = window.location.pathname.match(/\/p(\d+)/);
         return match ? match[1] : null;
     }
 
-    // Ensure at least one bundle is selected
     function normalizeBundleSelection(list) {
         if (!list || !list.length) return [];
         if (list.some((b) => b.selected)) return list;
@@ -33,30 +26,32 @@
         return list;
     }
 
-    // Find where to insert bundles in Salla's DOM
     function getInsertionPoint() {
-        const form = document.querySelector(
-            '#single-product-form, form.product-form',
-        );
+        const form = document.querySelector('#single-product-form, form.product-form');
         if (!form) return null;
 
-        // Priority 1: Insert after fire icon (sold items counter)
         const fireIcon = form.querySelector('.sicon-fire');
         if (fireIcon) {
             const row = fireIcon.closest('.my-6');
             if (row) return row;
         }
 
-        // Priority 2: Insert after price element
-        const priceEl = form.querySelector('.total-price-single');
+        const priceEl = document.querySelector('.total-price-single');
         return priceEl?.closest('.flex.flex-wrap') || null;
     }
 
-    // Build HTML for bundles cards
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function (m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
     function buildBundlesHTML(bundlesData) {
-        const cardsHTML = bundlesData
-            .map(
-                (bundle) => `
+        const cardsHTML = bundlesData.map((bundle) => `
             <a class="lunel-bundles__card${bundle.selected ? ' lunel-bundles__card--selected' : ''}"
                href="${bundle.href || '#'}"
                role="button"
@@ -75,9 +70,7 @@
                 </div>
                 <div class="lunel-bundles__label">${escapeHtml(bundle.title)}</div>
             </a>
-        `,
-            )
-            .join('');
+        `).join('');
 
         return `
             <section id="${LUNEL_BUNDLES_ROOT_ID}" class="lunel-bundles" dir="rtl">
@@ -87,22 +80,8 @@
         `;
     }
 
-    // Simple XSS protection
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function (m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
-    }
-
-    // Handle card selection clicks
     function attachClickHandler() {
-        const grid = document.querySelector(
-            `#${LUNEL_BUNDLES_ROOT_ID} .lunel-bundles__grid`,
-        );
+        const grid = document.querySelector(`#${LUNEL_BUNDLES_ROOT_ID} .lunel-bundles__grid`);
         if (!grid) return;
 
         grid.addEventListener('click', (e) => {
@@ -114,23 +93,16 @@
 
             grid.querySelectorAll('.lunel-bundles__card').forEach((el) => {
                 const isSelected = el.dataset.bundleId === bundleId;
-                el.classList.toggle(
-                    'lunel-bundles__card--selected',
-                    isSelected,
-                );
+                el.classList.toggle('lunel-bundles__card--selected', isSelected);
                 el.setAttribute('aria-pressed', isSelected);
             });
 
-            // Optional: Trigger custom event for store owner to hook into
-            window.dispatchEvent(
-                new CustomEvent('lunelBundleSelected', {
-                    detail: { bundleId: bundleId },
-                }),
-            );
+            window.dispatchEvent(new CustomEvent('lunelBundleSelected', {
+                detail: { bundleId: bundleId }
+            }));
         });
     }
 
-    // Insert bundles into the page
     function insertBundles(bundlesData) {
         if (document.getElementById(LUNEL_BUNDLES_ROOT_ID)) return true;
 
@@ -142,26 +114,23 @@
         return true;
     }
 
-    // ============================================
-    // FAST INITIALIZATION - Runs immediately
-    // ============================================
-    (function() {
-        // Try to insert immediately without waiting for DOMContentLoaded
-        const productId = getProductIdFromURL();
-        if (productId && BUNDLES_BY_PRODUCT_ID[productId]) {
-            const bundlesData = normalizeBundleSelection(BUNDLES_BY_PRODUCT_ID[productId].bundles);
-            if (bundlesData.length) {
-                // Immediate attempt
-                if (!insertBundles(bundlesData)) {
-                    // If fails (DOM not ready), use MutationObserver as fallback
-                    const observer = new MutationObserver(() => {
-                        if (insertBundles(bundlesData)) observer.disconnect();
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                    // Timeout fallback - disconnect after 3 seconds to prevent memory leaks
-                    setTimeout(() => observer.disconnect(), 3000);
+    // FAST INITIALIZATION
+    const productId = getProductIdFromURL();
+    if (productId && BUNDLES_BY_PRODUCT_ID[productId]) {
+        const bundlesData = normalizeBundleSelection(BUNDLES_BY_PRODUCT_ID[productId].bundles);
+        if (bundlesData.length) {
+            let attempts = 0;
+            const maxAttempts = 20;
+            
+            function tryInsert() {
+                if (insertBundles(bundlesData)) return;
+                attempts++;
+                if (attempts < maxAttempts) {
+                    setTimeout(tryInsert, attempts * 50);
                 }
             }
+            
+            tryInsert();
         }
-    })();
+    }
 })();
